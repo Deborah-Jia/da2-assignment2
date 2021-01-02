@@ -1,7 +1,10 @@
+rm(list=ls())
 library(tidyverse)
 library(dplyr)
+library(RCurl)
 
-df2 <- read_csv2("/Users/wodediannao/Desktop/da2-assignment2/data/raw/b_f_raw1.csv")
+url_git <- url("https://github.com/Deborah-Jia/da2-assignment2/blob/main/data/raw/b_f_raw1.csv", "rb")
+df2 <- read_html(url_git)
 
 df2 <- df2[-c(38),]
 
