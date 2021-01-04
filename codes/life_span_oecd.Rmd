@@ -1,0 +1,317 @@
+---
+title: "To Live Longer, What We Should Do?"
+author: '2000692'
+date: "1/3/2021"
+output:
+  pdf_document: default
+  html_document: default
+---
+# Abstract
+We wonder, for the well-being of a certain human, which factor matters more. Our conclusion based on data from OECD data set of Better Life, 2017, suggests that people in OECD countries feeling 1% safer walking at night, will have a longer life expectancy of 0.27 year, while political status(such as voter turnout) and environment factors(water and air quality) might have a negative effect on life expectancy. This result, aiming for a prediction analysis,  will shed some light on the study of sociologists and biologists, who can improve road security status and people's psychological construction,  while aiming for a longer life span.
+
+# Introduction
+We are interested how certain factors(air quality, homicide rate, employment rate, etc.)  are associated with life span of nationals in a country. We argue, that these factors are strongly connected to life expectancy. Our research result will give reference for sociology scholars on how to improve life span of human.
+
+To answer our question, we select data from OECD data set and build a multiple linear regression model, which shares some perceptiveness to this question.
+
+# Data 
+We concentrate on nationals of [OECD]("https://en.wikipedia.org/wiki/OECD") countries in year 2017. We retrieved the data from [OECD data set]("https://stats.oecd.org/Index.aspx?DataSetCode=BLI#"), which include indicators such as housing expenditure, employment rate, years in education, air pollution and so forth. These official data have quite high quality, so measurement error can be neglected. However, as the data are retrieved from OECD countries, there might be problems if we intend to check external validity of all countries: we can harldy confirm this is a representative sample.
+
+```{r setup, include=FALSE}
+# clear the memory 
+rm(list=ls())
+library(lspline)
+library(pander)
+library(data.table) # create table to hold all info
+library(dplyr) #clean data in the dataframe
+library(ggplot2) # to draw plots
+library(stringr) # intercept characters from a tring
+library(ggExtra) # make extra plots
+library(tidyr) # wrangle dataframe
+require(scales) # change the scale of axis in plots
+library(ggthemes) # change the themes of plots
+library('knitr') # to make the screenshot of data frame prettier
+library(kableExtra)
+library(tidyverse)
+library(purrr)
+library(moments)
+library(tibble)
+library("huxtable")
+library(jtools)   
+library(estimatr)
+
+theme_set(theme_bw()) # preset the theme
+
+# get raw data from github
+my_url <- "https://raw.githubusercontent.com/Deborah-Jia/da2-assignment2/main/data/"
+df2 <- read_csv2(paste0(my_url, 'raw/b_f_raw.csv'))
+
+# row 38 is the sum of all OECD countries,so delete it
+df2 <- df2[-c(38),]
+
+# choose variables that contain at least 40 observations
+df2 <- df2 %>% select(c(`Country`,`Life expectancy`,`Employment rate`,`Air pollution`,`Water quality`,`Quality of support network`,`Voter turnout`,`Feeling safe walking alone at night`,`Homicide rate`))
+
+# some of the variable names are too long; shorten them
+df2 <- df2 %>% rename(employ_r = `Employment rate`, air_pol = `Air pollution`,
+               water_q = `Water quality`, network = `Quality of support network`, v_turnout = `Voter turnout`,
+               life_exp = `Life expectancy`, walk_n = `Feeling safe walking alone at night`, homicide = `Homicide rate`)
+
+# save the file locally, and then push to github for further analysis
+my_path <- "/Users/wodediannao/Desktop/da2-assignment2/data/"
+write_csv( df2 , paste0(my_path,'clean/b_f_clean.csv'))
+```
+
+To keep our study precise, we removed variables with less than 40 observations; in the end, we obtained 9 variables: country names, life expectancy, employment rate, air pollution, water quality, supportive network, voter turnout, safety of walking at night and homicide. In the examination of these variables, we found some extreme values in homicide rate, which will affect our regression result, considering the size of our sample(40 observations, only). So, we decide not to drop these 5 values, but rather replace them with mean value of remaining 35 observations.
+
+We intend to find the association of pattern between life expectancy and other factors. Our aim, is to find which factor contribute most to people's life span. Thus, we will analyze the statistics of these variables and build our model.
+
+The following table shows the descriptive statistics of these variables. As we notice, 3/4 of our variables(except air pollution and life expectancy) are in percentage unit, which can not offer us further relative differences even if log transformation is applied. We also check all histograms, most of which do not have right-tailed pattern, except one, the homicide rate. 
+
+```{r,include=FALSE}
+# load data from github
+library(readr)
+my_url <- "https://raw.githubusercontent.com/Deborah-Jia/da2-assignment2/main/data/"
+df <- read_csv(paste0(my_url, 'clean/b_f_clean.csv'))
+```
+
+```{r,include=FALSE}
+# Create descriptive table
+
+get_statistics <- function(x_var){ summarise(df,
+  n        = sum( !is.na(x_var) ),
+  Min      = min(x_var),
+ '1st IQR' = round(quantile(x_var, 0.25,na.rm = T),2),
+  Median   = median(x_var),
+ '3rd IQR' = round(quantile(x_var,0.75, na.rm = T),2),
+  Max      = max(x_var),
+  Mean     = round(mean(x_var),digits = 2),
+  Std.      = round(sd(x_var),digits = 2),
+  Skew     = round(skewness(x_var),digits = 2)) }
+
+s_air_pol <- get_statistics(df$air_pol)
+s_employ_r <- get_statistics(df$employ_r)
+s_homicide <- get_statistics(df$homicide)
+s_network  <- get_statistics(df$network)
+s_v_turnout <- get_statistics(df$v_turnout)
+s_walk_n <- get_statistics(df$walk_n)
+s_water_q <- get_statistics(df$water_q)
+s_life_exp <- get_statistics(df$life_exp)
+```
+
+```{r,echo=F, message=FALSE, warning=FALSE}
+SummStats <- s_air_pol %>% add_row(s_employ_r) %>% add_row(s_homicide) %>% add_row(s_life_exp) %>% 
+  add_row(s_network) %>% add_row(s_v_turnout) %>% add_row(s_walk_n ) %>% add_row(s_water_q) %>% 
+  add_column(c('Air pollution','Employment rate', 'Homicide rate', 'Life expectancy','Quality of support network', 'Voter turnout', 'Feeling safe walking alone at night', 'Water quality'))
+
+names(SummStats)[10] <- 'Name' 
+SummStats %>% relocate(Name) %>% kable(caption = 'Summary Statistics of Variables ')
+
+```
+
+```{r echo=F, warning=FALSE, message=FALSE}
+
+df %>%
+  keep(is.numeric) %>% 
+  gather() %>% 
+  ggplot(aes(value)) +
+  facet_wrap(~key, scales = "free") +
+  geom_histogram()
+
+```
+Also, we intend to find if there are correlation among explanatory variables so as to avoid collinearity. It turns out that these variables are independent, so we do not need further actions to remove them.
+
+```{r, include=F}
+# Check the correlations of different variables
+#
+numeric_df <- keep( df , is.numeric )
+cT <- cor(numeric_df , use = "complete.obs")
+
+# Check for highly correlated values:
+sum( abs(cT) >= 0.8 & cT != 1 ) / 2
+# Find the correlations which are higher than 0.8
+id_cr <- which( abs(cT) >= 0.8 & cT != 1 )
+
+rm(numeric_df,cT , id_cr)
+```
+
+Recall the extreme values of homicide rate: considering the small size of our sample, obviously these extreme values will affect our regression result. However, if we simply remove these values, our sample size will become even smaller, and we will be further from precise result as well. So, we decide to replace these 5 extreme values with the mean value of homicide rate.
+
+```{r, include=F}
+df$homicide <- replace(df$homicide, df$homicide > 9 ,0) 
+
+df$homicide <- replace(df$homicide, df$homicide == 0, mean(!is.na(df$homicide))) 
+```
+
+# Model
+
+We intend to regress all variables on life expectancy. First, let's check lowess smoother graph to have a general idea about the pattern of life expectancy and other variables. Apart from employment rate and homicide rate, there are clear linear trend between life expectancy and other variables.
+
+```{r echo=F, warning=FALSE, warning=FALSE, message=FALSE ,out.width= "25%"}
+chck_sp <- function(x_var){
+  ggplot( df , aes(x = x_var, y = life_exp)) +
+    geom_point() +
+    geom_smooth(method="loess" , formula = y ~ x )+
+    labs(y = "Life Span") 
+}
+
+chck_sp(df$employ_r)
+
+chck_sp(df$air_pol)
+
+chck_sp(df$water_q)
+
+chck_sp(df$network)
+
+chck_sp(df$v_turnout)
+
+chck_sp(df$walk_n)
+chck_sp(df$homicide)
+```
+
+We try to capture this connection with a linear model:
+
+*(life expectancy)E = beta0 + beta1(employment_rate) + beta2(air pollution) + beta3(water quality) + beta4 (supportive of network) + beta5(voter turnout) + beta6(feeling safe walking at night) + beta7(homicide rate)*
+
+Note here that we are not taking all 40 observations for regression, but rather randomly filter out 8 observations for subsequent prediction and leave remaining observations for regression.
+```{r, include=F}
+# chose 32 (4/5) of these countries for modeling, and leave the rest for prediction
+set.seed(123)
+x = as.integer(runif(8, min = 0, max = 40))
+print(x)
+
+# x = 11 31 16 35 37  1 21 35, so we filter out these countries for prediction
+df1 <-df[c(11,31,16,35,37,1,21,35),] # name a new dataframe for prediction
+
+df <- df[-c(11,31,16,35,37,1,21,35),] # delete 8 countries
+```
+
+```{r, include=F}
+# first model: multiple linear regression including all variables
+reg1 <- lm_robust( life_exp ~ air_pol + employ_r + homicide + network + v_turnout + walk_n + water_q , data = df )
+summary( reg1 )
+
+# p value of homicide not significant, delete and try again with remaining 6 variables
+reg2 <- lm_robust( life_exp ~ air_pol + employ_r + network + v_turnout + walk_n + water_q , data = df )
+summary( reg2 )
+
+# p value of voter turnout not significant, delete and try again with remaining 5 variables
+reg3 <- lm_robust( life_exp ~ air_pol + employ_r + v_turnout + walk_n + water_q , data = df )
+summary( reg3 )
+
+reg4 <- lm_robust( life_exp ~ air_pol + v_turnout + walk_n + water_q , data = df )
+summary( reg4 )
+
+reg5 <- lm_robust( life_exp ~ v_turnout + walk_n + water_q, data = df )
+summary( reg5 )
+
+```
+
+Our first model include all variables, in which we check the p value of all variables and eliminate one with p value larger pre-set significant level(10%). Our second model contains 6 explanatory variables only, in which we check again and delete unacceptable variable, regarding its p value. One by one, in the end we find that only the p values of "feeling safe walking at night", voter turnout and water quality are significant. Model 4 is our final choice. To be more specific, we can say that, comparing OECD nationals living under:
+
+* same air pollution level, voter turnout rate and same percentage for feeling safe walking at night, people with ten percent higher water quality, on average, live less than 0.6 years.
+* or, same same air pollution level, voter turnout rate and same level water quality, people with one higher percentage for feeling safe walking at night, on average, live more than 0.27 years.
+* same air pollution level, same water quality and same percentage for feeling safe walking at night, people with ten percent higher voter turnout, on average, live less than 0.3 years.
+* same voter turnout rate, same water quality and same percentage for feeling safe walking at night, people with ten percentage higher air pollution level, on average, live less than 0.5 years.
+
+Based on model 4, we can declare with 95% confidence that the 51% of association is composed of linear regression. "Feeling safe walking at night has positive, while others have negative association with OECD national life span. All are significant at 10%. Model 4 is a better fit.
+
+Why not model 5? You may ask. Sure we get a higher adjusted R-square in model 5, at the cost of substituting one more variable, which is suspect of "over-fitting". Besides, we would like to study the possible interaction of water quality and air pollution for robustness check, so it is better to keep air pollution in this model.
+
+```{r, message = F, warning = F, echo = F,size=1, fig.height= 3, fig.align='center'}
+# Model Summary Statistics #
+mss <- export_summs(reg1,reg2,reg3, reg4, reg5)
+as_hux(mss)
+```
+
+# Residual Analysis
+
+For these 3 countries in table 2(see Appendix), the model overestimated life expectancy, as the actual value is smaller than the predicted value; in another word, these countries have short life span than average. The explanation could be extreme weather(temperature too hot or too cold) or worsened social safety conditions.
+
+For these 3 countries in table 3(see Appendix), the model underestimated life expectancy, as the actual value is larger than the predicted value; in another word, these countries have longer life span than average. The explanation could be healthy(Mediterranean and Eastern Asian diet) or complete social security administration.
+
+Also, we check the y and y_hat plot(see Appendix) to examine the model fit. We can see that most scatters fall aside the line, indicating a good fit of the model.
+
+# Prediction and Robustness analysis
+
+We are concerned whether our analysis and model are true for other OECD countries; also, we wonder if the model we chose is truly "robust".  Therefore, we check for two alternative specification:
+
+* We test these 8 countries that are set aside for prediction analysis.
+* We try to find the interaction between air pollution and water quality, as well as possible piecewise linear spline pattern as an alternative.
+
+As we have only 8 observations for prediction analysis, it is difficult to draw a scatter plot and tell from the graph whether our prediction is precise, and also we are not certain if any of these 8 countries have extreme value, which will drag our analysis even further. Therefore, We choose to get the mean value of each variable and calculate the predicted value of this one "average" country.
+
+We check the residual of the regression model on the average value of 8 countries(see Appendix, table 4). The residual is also acceptable. Thus, we can say that our regression model is reasonable. 
+
+Also, we wonder whether our model performance will remain unchanged, taking interaction of explanatory variables and alternative models. First, we add interaction of air pollution and water quality as a new variable, which provides us with a new model. Also, from the scatter plot of life expectancy and air pollution, we find there are two "turning points" at x = 10 and 20; so we make a piecewise linear regression at these points, to see if this model will better fit the pattern.
+
+
+As we can see from figure in the end of appendix, indeed using piecewise linear spline and interactions of certain x slightly increases R-square of the model, and they do not decrease p value of each variable to a significant degree. Furthermore, both models are more complicated to interpret. So, we decide to stick to the original model.
+
+
+# Summary
+We study the relationship between life expectancy and air pollution, water quality, voter turnouts, the percentage of people feeling safe walking at night, in OECD countries. We build a multiple linear regression model, where we reach a conclusion that "Feeling safe walking at night has positive, while others have negative association with OECD national life span. Changing the model does not seems to have a significant effect on model fit. Also, the conclusion might be referential to sociologists: more effort in road safety and people's psychological health will possibly lead to longer life span.
+
+# Appendix
+
+```{r, echo=F, message=FALSE, warning=FALSE}
+# Get the predicted y values from the model
+df$exp_pred <- reg4$fitted.values
+
+# Calculate the errors of the model
+df$reg4_res <- df$life_exp - df$exp_pred
+
+# Find countries with largest negative errors
+df %>% top_n( -3 , reg4_res ) %>% 
+  select( Country, life_exp,exp_pred, reg4_res) %>% kable(caption = "List of Coutnries with largest negative errors, Top 3")
+```
+
+```{r, echo=F, message=FALSE, warning=FALSE}
+# Find countries with largest positive errors
+df %>% top_n( 3 , reg4_res ) %>% 
+  select( Country, life_exp,exp_pred, reg4_res) %>%  kable(caption = "List of Coutnries with largest positive errors, Top 3")
+```
+
+```{r echo=F, warning=FALSE, message=FALSE ,out.width= "50%"}
+# check if the model is fit, using prediction and actual values of y(life expectancy)
+#y_hat-y plot
+ggplot( data = df ) +
+  geom_point (aes( x = exp_pred , y = life_exp ) ,  color="red")+
+  geom_line( aes( x = life_exp , y = life_exp ) , color = "navyblue" , size = 1.5 )+
+  labs( x = "Predicted life expectancy", y = "Actual life expectancy")
+```
+
+```{r, echo=F, message=FALSE, warning=FALSE}
+
+df1 <- df1 %>% add_row(Country = "average",life_exp= mean(df1$life_exp), air_pol= mean(df1$air_pol), 
+                water_q = mean(df1$water_q), v_turnout= mean(df1$v_turnout), walk_n=mean(df1$walk_n))
+
+exp_pred1 <- 68.65265 + -0.04567 * df1$air_pol[9] + -0.02675 * df1$v_turnout[9] +
+  0.27032 * df1$walk_n[9] + -0.06056 * df1$water_q[9]
+
+reg4_res1 <-  df$life_exp[9] - exp_pred1
+
+data_frame(
+  life_exp = df$life_exp[9],
+  exp_pred = exp_pred1, 
+  reg4_res = reg4_res1
+  
+) %>% kable(caption = "prediction of regression model 4")
+
+```
+
+```{r, include=FALSE}
+reg41 <- lm_robust( life_exp ~ air_pol + v_turnout + walk_n + water_q +  air_pol*water_q, 
+                    data = df )
+summary( reg41 )
+
+reg42 <- lm_robust( life_exp ~ lspline(air_pol, c(10,20)) + v_turnout + walk_n + water_q, 
+                    data = df )
+summary( reg42 )
+```
+
+```{r, message = F, warning = F, echo = F,size=1, fig.height= 3, fig.align='center'}
+# Model Summary Statistics #
+mss2 <- export_summs( reg41, reg42)
+as_hux(mss2)
+```
